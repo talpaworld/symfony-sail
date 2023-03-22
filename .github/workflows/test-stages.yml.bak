@@ -1,0 +1,183 @@
+name: Test stages
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - .devcontainer/**
+      - .gitignore
+      - LICENSE
+      - README.md
+
+jobs:
+  caddy_dev:
+      runs-on: ubuntu-latest
+      strategy:
+        fail-fast: false
+        matrix:
+          caddy-version: ["2"]
+      steps:
+        - name: Build stage
+          uses: docker/build-push-action@v4
+          with:
+              target: caddy_dev
+              tags: caddy_dev:latest
+              build-args: |
+                  CADDY_VERSION=${{ matrix.caddy-version }}
+
+        - name: Test caddy
+          run: |
+            docker run --rm caddy_dev:latest /bin/sh -c 'command -v caddy'
+            docker run --rm caddy_dev:latest /bin/sh -c '[ -f /etc/caddy/Caddyfile ]'
+            docker run --rm caddy_dev:latest /bin/sh -c 'caddy list-modules | grep vulcain'
+
+  caddy_prod:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        caddy-version: ["2"]
+    steps:
+      - name: Build stage
+        uses: docker/build-push-action@v4
+        with:
+            target: caddy_prod
+            tags: caddy_prod:latest
+            build-args: |
+                CADDY_VERSION=${{ matrix.caddy-version }}
+
+      - name: Test caddy
+        run: |
+          docker run --rm caddy_prod:latest /bin/sh -c 'command -v caddy'
+          docker run --rm caddy_prod:latest /bin/sh -c '[ -f /etc/caddy/Caddyfile ]'
+          docker run --rm caddy_prod:latest /bin/sh -c 'caddy list-modules | grep vulcain'
+
+  node_builder:
+      runs-on: ubuntu-latest
+      name: node_builder (Node ${{ matrix.node-version }}, bundler ${{ matrix.bundler }})
+      strategy:
+        fail-fast: false
+        matrix:
+          node-version: ["lts", "current", "17", "16"]
+          bundler: ['none', 'webpack-encore']
+      steps:
+        - name: Checkout
+          uses: actions/checkout@v3
+
+        - name: Create Webpack Encore resouces
+          if: ${{ matrix.bundler == 'webpack-encore' }}
+          run: |
+            rm -rf .git
+            git init
+            git remote add origin https://github.com/symfony/recipes.git
+            git sparse-checkout init
+            git sparse-checkout set "symfony/webpack-encore-bundle/1.10"
+            git pull origin main
+            mv -f symfony/webpack-encore-bundle/1.10/* .
+            rm -rf symfony/
+
+        - name: Build stage
+          uses: docker/build-push-action@v4
+          with:
+            context: .
+            target: node_builder
+            tags: node_builder:latest
+
+        - name: Test Webpack Encore
+          if: ${{ matrix.bundler == 'webpack-encore' }}
+          run: |
+            docker run --rm node_builder:latest /bin/sh -c '[ -d public/build ] && [ -n "$(ls -A public/build)" ]'
+
+  php_prod:
+    runs-on: ubuntu-latest
+    name: php_prod (PHP ${{ matrix.php-version }}, deps ${{ matrix.dependencies }})
+    strategy:
+      fail-fast: false
+      matrix:
+        php-version: ["8.2", "8", "8.1", "8.0", "7.4"]
+        dependencies: ["none", "plain-composer", "symfony-skeleton"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Create dependencies metadata
+        if: ${{ matrix.dependencies != 'none' }}
+        run: |
+          if [ "${{ matrix.dependencies }}" = "plain-composer" ]; then composer init --name ${{ github.repository }} --no-interaction; fi
+          if [ "${{ matrix.dependencies }}" = "symfony-skeleton" ]; then curl -OLsS https://raw.githubusercontent.com/symfony/skeleton/6.2/composer.json; fi
+          if [ "${{ matrix.dependencies }}" = "symfony-skeleton" ] && [ "${{ matrix.php-version }}" = "8.0" ]; then curl -OLsS https://raw.githubusercontent.com/symfony/skeleton/5.4/composer.json; fi
+          if [ "${{ matrix.dependencies }}" = "symfony-skeleton" ] && [ "${{ matrix.php-version }}" = "7.4" ]; then curl -OLsS https://raw.githubusercontent.com/symfony/skeleton/5.4/composer.json; fi
+
+      - name: Create preload file
+        run:
+          mkdir -p config && touch config/preload.php
+
+      - name: Build stage
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          target: php_prod
+          tags: php_prod:latest
+          build-args: |
+            PHP_VERSION=${{ matrix.php-version }}
+
+      - name: Test php
+        run: |
+          docker run --rm php_prod:latest /bin/sh -c 'command -v php'
+          docker run --rm php_prod:latest /bin/sh -c "php -m | grep -Ei 'apcu|gd|intl|opcache|pdo_mysql|xsl|zip'"
+          docker run --rm php_prod:latest /bin/sh -c 'cmp --silent "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini"'
+          docker run --rm php_prod:latest /bin/sh -c '[ -f "$PHP_INI_DIR/conf.d/zz-app.ini" ]'
+          docker run --rm php_prod:latest /bin/sh -c '[ -f "$PHP_INI_DIR/conf.d/zz-app.prod.ini" ]'
+          docker run --rm php_prod:latest /bin/sh -c '[ -f "$PHP_INI_DIR/conf.d/preload.ini" ]'
+          docker run --rm php_prod:latest /bin/sh -c '[ -f /usr/local/etc/php-fpm.d/zz-docker.conf ]'
+
+      - name: Test dependencies install and autoload
+        if: ${{ matrix.dependencies != 'none' }}
+        run: |
+          docker run --rm php_prod:latest /bin/sh -c '[ -f composer.lock ]'
+          docker run --rm php_prod:latest /bin/sh -c '[ -f vendor/autoload.php ]'
+
+      - name: Test commands
+        run: |
+          docker run --rm php_prod:latest /bin/sh -c 'command -v composer'
+          docker run --rm php_prod:latest /bin/sh -c 'command -v git'
+
+      - name: Test env
+        run: |
+          docker run --rm php_prod:latest /bin/sh -c 'printenv COMPOSER_ALLOW_SUPERUSER'
+          docker run --rm php_prod:latest /bin/sh -c 'printenv COMPOSER_MEMORY_LIMIT'
+
+  php_dev:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php-version: ["8.2", "8", "8.1", "8.0", "7.4"]
+    steps:
+      - name: Build stage
+        uses: docker/build-push-action@v4
+        with:
+          target: php_dev
+          tags: php_dev:latest
+          build-args: |
+            PHP_VERSION=${{ matrix.php-version }}
+
+      - name: Test php
+        run: |
+          docker run --rm php_dev:latest /bin/sh -c 'command -v php'
+          docker run --rm php_dev:latest /bin/sh -c "php -m | grep -Ei 'apcu|gd|intl|opcache|pdo_mysql|xdebug|xsl|zip'"
+          docker run --rm php_dev:latest /bin/sh -c 'cmp --silent "$PHP_INI_DIR/php.ini-development" "$PHP_INI_DIR/php.ini"'
+
+      - name: Test commands
+        run: |
+          docker run --rm php_dev:latest /bin/sh -c 'command -v composer'
+          docker run --rm php_dev:latest /bin/sh -c 'command -v git'
+          docker run --rm php_dev:latest /bin/sh -c 'command -v npm'
+          docker run --rm php_dev:latest /bin/sh -c 'command -v ssh'
+          docker run --rm php_dev:latest /bin/sh -c 'command -v yarn'
+
+      - name: Test env
+        run: |
+          docker run --rm php_dev:latest /bin/sh -c 'printenv COMPOSER_ALLOW_SUPERUSER'
+          docker run --rm php_dev:latest /bin/sh -c 'printenv COMPOSER_MEMORY_LIMIT'

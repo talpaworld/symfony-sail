@@ -1,0 +1,47 @@
+version: "3.8"
+
+services:
+  caddy:
+    build:
+      context: ./
+      args:
+        CADDY_VERSION: ${CADDY_VERSION:-2}
+    environment:
+      SERVER_NAME: ${SERVER_NAME:-localhost:80, localhost}
+      TZ: ${TZ:-UTC}
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+      - php_socket:/var/run/php
+  php:
+    build:
+      context: ./
+      args:
+        PHP_VERSION: ${PHP_VERSION:-8.2}
+        COMPOSER_VERSION: ${COMPOSER_VERSION:-lts}
+    environment:
+      WRITABLE_DIRS: ${WRITABLE_DIRS:-public/uploads var}
+      TZ: ${TZ:-UTC}
+    volumes:
+      - php_socket:/var/run/php
+
+  db:
+    build:
+      context: ./
+      args:
+        MARIADB_VERSION: ${MARIADB_VERSION:-10.9}
+    volumes:
+      - db_data:/var/lib/mysql
+    environment:
+      MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: "true"
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-}
+      MARIADB_USER: ${DB_USER:-}
+      MARIADB_PASSWORD: ${DB_PASSWORD:-}
+      MARIADB_DATABASE: ${DB_NAME:-}
+      TZ: ${TZ:-UTC}
+
+volumes:
+  caddy_config:
+  caddy_data:
+  php_socket:
+  db_data:

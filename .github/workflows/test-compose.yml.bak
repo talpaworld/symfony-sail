@@ -1,0 +1,172 @@
+name: Test compose
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - .devcontainer/**
+      - .gitignore
+      - LICENSE
+      - README.md
+
+jobs:
+  prod:
+    runs-on: ubuntu-latest
+    name: prod (${{ matrix.caddy-version && format('Caddy {0}', matrix.caddy-version) }}${{ matrix.php-version && format('PHP {0}', matrix.php-version) }}${{ matrix.composer-version && format('Composer {0}', matrix.composer-version) }}${{ matrix.mariadb-version && format('MariaDB {0}', matrix.mariadb-version) }}${{ matrix.node-version && format('Node {0}', matrix.node-version) }}${{ matrix.tz && format('TZ {0}', matrix.tz) }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { caddy-version: "2" }
+          - { php-version: "8.2" }
+          - { php-version: "8" }
+          - { php-version: "8.1" }
+          - { php-version: "8.0" }
+          - { php-version: "7.4" }
+          - { composer-version: "latest" }
+          - { composer-version: "lts" }
+          - { composer-version: "2" }
+          - { composer-version: "1" }
+          - { mariadb-version: "10.7" }
+          - { mariadb-version: "latest" }
+          - { mariadb-version: "10" }
+          - { node-version: "lts" }
+          - { node-version: "17" }
+          - { node-version: "16" }
+          - { tz: "UTC" }
+          - { tz: "Europe/Rome" }
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Create .env file
+        run: |
+          if [ "2" != "${{ matrix.caddy-version }}" ]; then echo "CADDY_VERSION=${{ matrix.caddy-version }}" >> .env; fi
+          if [ "8.2" != "${{ matrix.php-version }}" ]; then echo "PHP_VERSION=${{ matrix.php-version }}" >> .env; fi
+          if [ "latest" != "${{ matrix.composer-version }}" ]; then echo "COMPOSER_VERSION=${{ matrix.composer-version }}" >> .env; fi
+          if [ "10.7" != "${{ matrix.mariadb-version }}" ]; then echo "MARIADB_VERSION=${{ matrix.mariadb-version }}" >> .env; fi
+          if [ "lts" != "${{ matrix.node-version }}" ]; then echo "NODE_VERSION=${{ matrix.node-version }}" >> .env; fi
+          if [ "UTC" != "${{ matrix.tz }}" ]; then echo "TZ=${{ matrix.tz }}" >> .env; fi
+
+      - name: Validate configuration
+        id: config
+        shell: bash -eux {0}
+        run: |
+          config=$(docker compose config --format=json | jq -c '.')
+          echo "config=$config" >> "$GITHUB_OUTPUT"
+
+      - name: Check configuration
+        env:
+          CONFIG: ${{steps.config.outputs.config}}
+        shell: bash -eux {0}
+        run: |
+          [ -z "$CONFIG" ] && exit 1
+
+          echo "$CONFIG" | jq -e 'select(.services.caddy.build.target=="caddy_prod")'
+          echo "$CONFIG" | jq -e 'select(.services.caddy.build.args.CADDY_VERSION=="${{ matrix.caddy-version || '2' }}")'
+          echo "$CONFIG" | jq -e 'select(.services.caddy.build.args.NODE_VERSION=="${{ matrix.node-version || 'lts' }}")'
+          echo "$CONFIG" | jq -e 'select(.services.caddy.environment.CADDY_ADMIN_OPTION=="admin off")'
+          echo "$CONFIG" | jq -e 'select(.services.caddy.environment.CADDY_DEBUG_OPTION=="")'
+          echo "$CONFIG" | jq -e 'select(.services.caddy.environment.SERVER_NAME=="\":80\"")'
+          echo "$CONFIG" | jq -e 'select(.services.caddy.environment.TZ=="${{ matrix.tz || 'UTC' }}")'
+
+          echo "$CONFIG" | jq -e 'select(.services.php.build.target=="php_prod")'
+          echo "$CONFIG" | jq -e 'select(.services.php.build.args.COMPOSER_VERSION=="${{ matrix.composer-version || 'latest' }}")'
+          echo "$CONFIG" | jq -e 'select(.services.php.build.args.PHP_VERSION=="${{ matrix.php-version || '8.2' }}")'
+          echo "$CONFIG" | jq -e 'select(.services.php.environment.COMPOSER_AUTH=="")'
+          echo "$CONFIG" | jq -e 'select(.services.php.environment.TZ=="${{ matrix.tz || 'UTC' }}")'
+
+          echo "$CONFIG" | jq -e 'select(.services.db.image=="mariadb:${{ matrix.mariadb-version || '10.7' }}")'
+          echo "$CONFIG" | jq -e 'select(.services.db.environment.MARIADB_ALLOW_EMPTY_ROOT_PASSWORD=="true")'
+          echo "$CONFIG" | jq -e 'select(.services.db.environment.TZ=="${{ matrix.tz || 'UTC' }}")'
+
+      - name: Start containers
+        run: docker compose up -d
+
+      - name: Check containers
+        run: |
+          [ "running" = $(docker inspect $(docker compose ps -q caddy) --format "{{.State.Status}}") ]
+          [ "running" = $(docker inspect $(docker compose ps -q php) --format "{{.State.Status}}") ]
+          [ "running" = $(docker inspect $(docker compose ps -q db) --format "{{.State.Status}}") ]
+
+  dev:
+    runs-on: ubuntu-latest
+    name: dev (${{ matrix.caddy-version && format('Caddy {0}', matrix.caddy-version) }}${{ matrix.php-version && format('PHP {0}', matrix.php-version) }}${{ matrix.composer-version && format('Composer {0}', matrix.composer-version) }}${{ matrix.mariadb-version && format('MariaDB {0}', matrix.mariadb-version) }}${{ matrix.node-version && format('Node {0}', matrix.node-version) }}${{ matrix.tz && format('TZ {0}', matrix.tz) }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { caddy-version: "2" }
+          - { php-version: "8.2" }
+          - { php-version: "8" }
+          - { php-version: "8.1" }
+          - { php-version: "8.0" }
+          - { php-version: "7.4" }
+          - { composer-version: "latest" }
+          - { composer-version: "lts" }
+          - { composer-version: "2" }
+          - { composer-version: "1" }
+          - { mariadb-version: "10.7" }
+          - { mariadb-version: "latest" }
+          - { mariadb-version: "10" }
+          - { node-version: "lts" }
+          - { node-version: "17" }
+          - { node-version: "16" }
+          - { tz: "UTC" }
+          - { tz: "Europe/Rome" }
+    outputs:
+      config: ${{ steps.config.outputs.config }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Create .env file
+        run: |
+          if [ "2" != "${{ matrix.caddy-version }}" ]; then echo "CADDY_VERSION=${{ matrix.caddy-version }}" >> .env; fi
+          if [ "8.2" != "${{ matrix.php-version }}" ]; then echo "PHP_VERSION=${{ matrix.php-version }}" >> .env; fi
+          if [ "latest" != "${{ matrix.composer-version }}" ]; then echo "COMPOSER_VERSION=${{ matrix.composer-version }}" >> .env; fi
+          if [ "10.7" != "${{ matrix.mariadb-version }}" ]; then echo "MARIADB_VERSION=${{ matrix.mariadb-version }}" >> .env; fi
+          if [ "lts" != "${{ matrix.node-version }}" ]; then echo "NODE_VERSION=${{ matrix.node-version }}" >> .env; fi
+          if [ "UTC" != "${{ matrix.tz }}" ]; then echo "TZ=${{ matrix.tz }}" >> .env; fi
+
+      - name: Validate configuration
+        id: config
+        shell: bash -eux {0}
+        run: |
+          config=$(docker compose -f docker-compose.yml -f docker-compose.dev.yml config --format=json | jq -c '.')
+          echo "config=$config" >> "$GITHUB_OUTPUT"
+
+      - name: Check configuration
+        env:
+          CONFIG: ${{steps.config.outputs.config}}
+        shell: bash -eux {0}
+        run: |
+          [ -z "$CONFIG" ] && exit 1
+
+          echo "$CONFIG" | jq -e 'select(.services.caddy.build.target=="caddy_dev")'
+          echo "$CONFIG" | jq -e 'select(.services.caddy.build.args.CADDY_VERSION=="${{ matrix.caddy-version || '2' }}")'
+          echo "$CONFIG" | jq -e 'select(.services.caddy.environment.CADDY_ADMIN_OPTION=="")'
+          echo "$CONFIG" | jq -e 'select(.services.caddy.environment.CADDY_DEBUG_OPTION=="debug")'
+          echo "$CONFIG" | jq -e 'select(.services.caddy.environment.SERVER_NAME=="\":80\"")'
+          echo "$CONFIG" | jq -e 'select(.services.caddy.environment.TZ=="${{ matrix.tz || 'UTC' }}")'
+
+          echo "$CONFIG" | jq -e 'select(.services.php.build.target=="php_dev")'
+          echo "$CONFIG" | jq -e 'select(.services.php.build.args.COMPOSER_VERSION=="${{ matrix.composer-version || 'latest' }}")'
+          echo "$CONFIG" | jq -e 'select(.services.php.build.args.NODE_VERSION=="${{ matrix.node-version || 'lts' }}")'
+          echo "$CONFIG" | jq -e 'select(.services.php.build.args.PHP_VERSION=="${{ matrix.php-version || '8.2' }}")'
+          echo "$CONFIG" | jq -e 'select(.services.php.environment.COMPOSER_AUTH=="")'
+          echo "$CONFIG" | jq -e 'select(.services.php.environment.TZ=="${{ matrix.tz || 'UTC' }}")'
+
+          echo "$CONFIG" | jq -e 'select(.services.db.image=="mariadb:${{ matrix.mariadb-version || '10.7' }}")'
+          echo "$CONFIG" | jq -e 'select(.services.db.environment.MARIADB_ALLOW_EMPTY_ROOT_PASSWORD=="true")'
+          echo "$CONFIG" | jq -e 'select(.services.db.environment.TZ=="${{ matrix.tz || 'UTC' }}")'
+
+      - name: Start containers
+        run: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+
+      - name: Check containers
+        run: |
+          [ "running" = $(docker inspect $(docker compose ps -q caddy) --format "{{.State.Status}}") ]
+          [ "running" = $(docker inspect $(docker compose ps -q php) --format "{{.State.Status}}") ]
+          [ "running" = $(docker inspect $(docker compose ps -q db) --format "{{.State.Status}}") ]

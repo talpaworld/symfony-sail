@@ -1,0 +1,29 @@
+services:
+  caddy:
+    image: ${COMPOSE_PROJECT_NAME}-caddy-prod
+    build:
+      target: caddy-prod
+      args:
+        NODE_VERSION: ${NODE_VERSION:-lts}
+    environment:
+      CADDY_ADMIN_OPTION: ${CADDY_ADMIN_OPTION:-admin off}
+      CADDY_DEBUG_OPTION: ${CADDY_DEBUG_OPTION:-}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+
+  php:
+    image: ${COMPOSE_PROJECT_NAME}-php-prod
+    build:
+      target: php-prod
+      args:
+        COMPOSER_AUTH: ${COMPOSER_AUTH:-}
+        KNOWN_HOSTS: ${KNOWN_HOSTS:-bitbucket.org github.com gitlab.com}
+
+  db:
+    image: ${COMPOSE_PROJECT_NAME}-mariadb-prod
+    build:
+      target: mariadb-prod
+    ports:
+      - "3306:3306"

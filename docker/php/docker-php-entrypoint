@@ -1,0 +1,26 @@
+#!/bin/sh
+set -e
+
+# first arg is `-f` or `--some-option`
+if [ "${1#-}" != "$1" ]; then
+  set -- php-fpm "$@"
+fi
+
+if [ "$1" = 'php-fpm' ] || [ "$1" = 'php' ] || [ "$1" = 'bin/console' ]; then
+  # Change PHP date.timezone based on the TZ env variable
+  if [ -n "$TZ" ]; then
+    echo "date.timezone = $TZ" >> ${PHP_INI_DIR}/conf.d/timezone.ini
+  fi
+
+  # Make all writable dirs writable by the server
+  if [ -n "$WRITABLE_DIRS" ]; then
+    for dir in $WRITABLE_DIRS; do
+      if [ -d "$dir" ]; then
+        setfacl -dR -m u:www-data:rwX -m u:$(whoami):rwX "$dir"
+        setfacl -R -m u:www-data:rwX -m u:$(whoami):rwX "$dir"
+      fi
+    done
+  fi
+fi
+
+exec "$@"
