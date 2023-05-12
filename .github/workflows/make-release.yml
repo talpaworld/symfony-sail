@@ -17,5 +17,5 @@ jobs:
         with:
           prerelease: true
           tag_name: latest
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GITHUBACCOUNT_TOKEN }}
           files: ${{ github.event.repository.name }}.zip
